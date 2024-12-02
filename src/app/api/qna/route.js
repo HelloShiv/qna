@@ -2,26 +2,50 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as qna from '@tensorflow-models/qna';
 import * as tf from '@tensorflow/tfjs';
 
-// Set the backend to 'cpu' explicitly (you can also try 'webgl' or 'wasm')
-tf.setBackend('cpu').then(() => {
-  console.log('Backend set to CPU');
-}).catch(err => {
-  console.error('Error setting backend:', err);
-});
+// Import backend modules
+import '@tensorflow/tfjs-backend-webgl';
+import '@tensorflow/tfjs-backend-wasm';
+import '@tensorflow/tfjs-backend-cpu';
 
-// Declare the model variable
 let model = null;
 
-// Load the QnA model
-const loadModel = async () => {
+// Set backend with fallback
+(async () => {
+  try {
+    await tf.setBackend('webgl');
+    console.log('Backend set to WebGL');
+  } catch (err) {
+    console.error('Error with WebGL backend, falling back to WASM:', err);
+    try {
+      await tf.setBackend('wasm');
+      console.log('Backend set to WASM');
+    } catch (err) {
+      console.error('Error with WASM backend, falling back to CPU:', err);
+      await tf.setBackend('cpu');
+      console.log('Backend set to CPU');
+    }
+  }
+  await tf.ready(); // Ensure TensorFlow.js is initialized
+  console.log('TensorFlow.js is ready');
+})();
+
+// Preload the model
+(async () => {
+  console.log("Preloading the model...");
+  model = await qna.load();
+  console.log("Model preloaded");
+})();
+
+// Ensure model is loaded
+const ensureModel = async () => {
   if (!model) {
-    console.log("Loading the model...");
+    console.log("Model not yet loaded, loading now...");
     model = await qna.load();
   }
   return model;
 };
 
-// POST method to handle question and passage for QnA
+// Handle POST requests
 export async function POST(req) {
   try {
     const { question, passage } = await req.json();
@@ -30,15 +54,12 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Question and passage are required' }, { status: 400 });
     }
 
-    // Load the model if it hasn't been loaded yet
-    const loadedModel = await loadModel();
-
-    // Find answers
+    const loadedModel = await ensureModel();
     const answers = await loadedModel.findAnswers(question, passage);
 
     return NextResponse.json({ answers });
   } catch (error) {
-    console.error('Error processing the request', error);
+    console.error('Error processing the request:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
